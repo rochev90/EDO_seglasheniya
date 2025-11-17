@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# PyCharm
+.idea/
+
+# Databases
+*.db
+*.sqlite3
+
+# Секретные данные
+.env
+config.ini
+secrets.json
+
+# Свои папки
+*.spec
+/build/
+/dist/
+/temp/
+/logs/
+/бэкап/
+/Новая папка/
+/Соглашения/
+/database/

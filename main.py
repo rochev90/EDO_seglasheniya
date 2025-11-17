@@ -36,7 +36,7 @@ class AgreementGeneratorGUI:
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         
         # OpenAI модель
-        self.openai_model = self.config.get("openai_model", "gpt-5-nano")
+        self.openai_model = self.config.get("openai_model", "gpt-4o-mini")
         
         # Менеджер БД
         self.db_manager = DatabaseManager()
@@ -66,7 +66,7 @@ class AgreementGeneratorGUI:
         """Загружает конфигурацию"""
         self.config = {
             "output_folder": "Соглашения",
-            "openai_model": "gpt-5-nano"
+            "openai_model": "gpt-4o-mini"
         }
         
         if os.path.exists(self.config_file):

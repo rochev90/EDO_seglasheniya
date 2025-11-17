@@ -5,17 +5,18 @@ import requests
 from typing import Tuple
 import os
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProcessor:
-    """Минимальный drop-in: прокси сохранены, только правильные поля для /responses.
-    gpt-5* -> Responses API, gpt-4o/4.1 -> Chat Completions.
-    """
+    """Процессор для работы с OpenAI Chat API (gpt-4o-mini)."""
+
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.model = "gpt-5-nano"  # может быть перезаписана извне
+        self.model = "gpt-4o-mini"
 
         # Прокси
         proxy_user = os.getenv('proxy_user')
@@ -26,71 +27,95 @@ class OpenAIProcessor:
         self.proxies = {"http": self.proxy_url, "https": self.proxy_url}
 
         self.chat_url = "https://api.openai.com/v1/chat/completions"
-        self.responses_url = "https://api.openai.com/v1/responses"
 
     def _headers(self):
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
-    def _use_responses_api(self) -> bool:
-        m = (self.model or "").lower().strip()
-        return m.startswith("gpt-5")  # всё семейство gpt-5 отправляем в /responses
-
     def convert_to_genitive(self, position: str, fio: str, max_retries: int = 3) -> Tuple[str, str]:
         """Возвращает (должность_в_родительном, ФИО_в_родительном)."""
-        # Инструкцию НЕ кладём в поле 'system' для /responses — его там нет.
         instruction = (
             "Ты эксперт по русскому языку. "
-            "Точно преобразуй должность и ФИО в родительный падеж. "
-            "Верни ответ строго в формате: должность|ФИО"
+            "Преобразуй должность и ФИО в родительный падеж (кого? чего?). "
+            "Верни ТОЛЬКО результат в формате: должность|ФИО\n\n"
+            "Примеры:\n"
+            "Генеральный директор|Иванов Иван Иванович -> Генерального директора|Иванова Ивана Ивановича\n"
+            "Директор|Петров Петр Петрович -> Директора|Петрова Петра Петровича"
         )
-        user_part = f"Должность: {position}\nФИО: {fio}\nФормат: должность|ФИО"
+        user_part = f"Должность: {position}\nФИО: {fio}"
 
         last_err = None
-        for _ in range(max_retries):
-            try:
-                if self._use_responses_api():
-                    # Responses API: 'system' нет, кладём инструкцию в input
-                    payload = {
-                        "model": self.model,
-                        "input": instruction + "\n\n" + user_part,
-                        "temperature": 0.1,
-                        "max_output_tokens": 150
-                    }
-                    r = requests.post(self.responses_url, headers=self._headers(), json=payload,
-                                      proxies=self.proxies, timeout=30)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"Responses {r.status_code}: {r.text}")
-                    js = r.json()
-                    content = js.get("output_text")
-                    if not content and js.get("choices"):
-                        content = js["choices"][0].get("message", {}).get("content")
-                else:
-                    # Chat Completions API
-                    payload = {
-                        "model": self.model,
-                        "messages": [
-                            {"role": "system", "content": instruction},
-                            {"role": "user", "content": user_part}
-                        ],
-                        "temperature": 0.1,
-                        "max_tokens": 150
-                    }
-                    r = requests.post(self.chat_url, headers=self._headers(), json=payload,
-                                      proxies=self.proxies, timeout=30)
-                    if r.status_code != 200:
-                        raise RuntimeError(f"Chat {r.status_code}: {r.text}")
-                    js = r.json()
-                    content = js["choices"][0]["message"]["content"]
+        last_response = None
 
-                if not content or "|" not in content:
-                    raise ValueError("Некорректный формат ответа модели")
-                p1, p2 = [p.strip() for p in content.split("|", 1)]
+        for attempt in range(max_retries):
+            try:
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": instruction},
+                        {"role": "user", "content": user_part}
+                    ],
+                    "max_tokens": 200,
+                    "temperature": 0.1
+                }
+
+                logger.debug(f"Попытка {attempt + 1}: Chat API ({self.model})")
+                r = requests.post(self.chat_url, headers=self._headers(), json=payload,
+                                  proxies=self.proxies, timeout=30)
+
+                if r.status_code != 200:
+                    logger.error(f"Ошибка API: {r.text}")
+                    raise RuntimeError(f"Chat API {r.status_code}: {r.text}")
+
+                js = r.json()
+                content = js["choices"][0]["message"]["content"]
+                last_response = content
+
+                logger.info(f"Попытка {attempt + 1}: Получен ответ: '{content}'")
+
+                # Очистка ответа
+                content = content.strip()
+
+                # Убираем markdown если есть
+                if content.startswith("```") and content.endswith("```"):
+                    content = content[3:-3].strip()
+
+                # Если многострочный - берем первую строку с |
+                if '\n' in content:
+                    for line in content.split('\n'):
+                        line = line.strip()
+                        if '|' in line:
+                            content = line
+                            break
+
+                # Проверка разделителя
+                if "|" not in content:
+                    raise ValueError(f"Нет разделителя | в ответе: {content}")
+
+                # Разделение
+                parts = content.split("|", 1)
+                p1, p2 = parts[0].strip(), parts[1].strip()
+
                 if not p1 or not p2:
-                    raise ValueError("Пустые части ответа модели")
+                    raise ValueError(f"Пустые части: '{p1}' | '{p2}'")
+
+                # Проверка что было преобразование
+                if p1.lower() == position.lower() and p2.lower() == fio.lower():
+                    logger.warning("Модель вернула исходные данные без изменений")
+                    raise ValueError("Не преобразовано в родительный падеж")
+
+                logger.info(f"✓ Успешно: {position} {fio} → {p1} {p2}")
                 return p1, p2
 
             except Exception as e:
                 last_err = str(e)
+                logger.warning(f"Попытка {attempt + 1}/{max_retries} неудачна: {last_err}")
+                if attempt < max_retries - 1:
+                    logger.info("Повторяю запрос...")
                 continue
 
-        raise Exception(f"Ошибка запроса к OpenAI API: {last_err}")
+        # Все попытки неудачны
+        error_msg = f"Ошибка после {max_retries} попыток: {last_err}"
+        if last_response:
+            error_msg += f"\nПоследний ответ: {last_response}"
+        logger.error(error_msg)
+        raise Exception(error_msg)

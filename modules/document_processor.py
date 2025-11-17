@@ -6,8 +6,10 @@ from datetime import datetime
 from typing import Dict
 from docx import Document
 
+
 class DocumentProcessor:
     """Создание документов из docx-шаблонов с подстановкой данных."""
+
     def __init__(self, output_folder: str = "Соглашения"):
         # Шаблоны всегда в <директория_программы>/data
         app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -49,6 +51,43 @@ class DocumentProcessor:
         }
 
     @staticmethod
+    def format_fio_short(full_fio: str) -> str:
+        """
+        Преобразует ФИО в формат И.О. Фамилия
+
+        Примеры:
+            "Иванов Иван Иванович" -> "И.И. Иванов"
+            "ИП Иванов Иван Иванович" -> "И.И. Иванов"
+            "Петров Петр" -> "П. Петров"
+        """
+        # Убираем "ИП" если есть
+        fio = full_fio.strip()
+        if fio.upper().startswith("ИП "):
+            fio = fio[3:].strip()
+
+        # Разделяем на части
+        parts = fio.split()
+
+        if len(parts) == 0:
+            return fio
+
+        # Фамилия всегда первая
+        surname = parts[0]
+
+        # Инициалы из имени и отчества
+        initials = []
+        for part in parts[1:]:
+            if part and len(part) > 0:
+                initials.append(part[0].upper() + ".")
+
+        # Формируем результат
+        if initials:
+            # Инициалы без пробелов между ними, затем пробел и фамилия
+            return "".join(initials) + " " + surname
+        else:
+            return surname
+
+    @staticmethod
     def _replace_in_paragraph(paragraph, mapping: Dict[str, str]):
         if not paragraph.text:
             return
@@ -77,10 +116,28 @@ class DocumentProcessor:
         return Document(path)
 
     def fill_ip_template(self, company: str, ip_name: str, ip_inn: str, fio: str) -> str:
+        """
+        Заполняет шаблон для ИП.
+
+        Args:
+            company: название компании (КАДИС, ЮрРегионИнформ)
+            ip_name: полное название ИП (например "ИП Иванов Иван Иванович")
+            ip_inn: ИНН
+            fio: ФИО (будет преобразовано в И.О. Фамилия)
+        """
         doc = self._open_template(company, "IP")
-        mapping = {"{{IP}}": ip_name, "{{IP_INN}}": ip_inn, "{{fio}}": fio}
+
+        # Форматируем ФИО в И.О. Фамилия
+        fio_short = self.format_fio_short(fio)
+
+        mapping = {
+            "{{IP}}": ip_name,
+            "{{IP_INN}}": ip_inn,
+            "{{fio}}": fio_short
+        }
         mapping.update(self._date_mapping())
         self._apply_mapping(doc, mapping)
+
         out_dir = self._ensure_output_dir(company)
         out_name = f"Соглашение_ЭДО_{self._safe_filename(ip_name)}.docx"
         out_path = os.path.join(out_dir, out_name)
@@ -88,15 +145,41 @@ class DocumentProcessor:
         return out_path
 
     def fill_ul_template(self, company: str, org_name: str, inn: str, kpp: str,
-                         position: str, fio: str, position_gen: str, fio_gen: str) -> str:
+                         position: str, fio: str, post_fixed: str, fio_fixed: str) -> str:
+        """
+        Заполняет шаблон для юридического лица.
+
+        ВАЖНО: Названия параметров post_fixed и fio_fixed соответствуют
+        вашим Word шаблонам с тегами {{post_fixed}} и {{fio_fixed}}!
+
+        Args:
+            company: название компании (КАДИС, ЮрРегионИнформ)
+            org_name: название организации
+            inn: ИНН
+            kpp: КПП
+            position: должность (именительный падеж)
+            fio: ФИО (именительный падеж, будет преобразовано в И.О. Фамилия)
+            post_fixed: должность (родительный падеж)
+            fio_fixed: ФИО (родительный падеж, будет преобразовано в И.О. Фамилия)
+        """
         doc = self._open_template(company, "OOO")
+
+        # Форматируем оба варианта ФИО в И.О. Фамилия
+        fio_short = self.format_fio_short(fio)
+        fio_fixed_short = self.format_fio_short(fio_fixed)
+
         mapping = {
-            "{{JL}}": org_name, "{{JL_INN}}": inn, "{{JL_KPP}}": kpp,
-            "{{post}}": position, "{{fio}}": fio,
-            "{{post_fixed}}": position_gen, "{{fio_fixed}}": fio_gen,
+            "{{JL}}": org_name,
+            "{{JL_INN}}": inn,
+            "{{JL_KPP}}": kpp,
+            "{{post}}": position,
+            "{{fio}}": fio_short,
+            "{{post_fixed}}": post_fixed,
+            "{{fio_fixed}}": fio_fixed_short,
         }
         mapping.update(self._date_mapping())
         self._apply_mapping(doc, mapping)
+
         out_dir = self._ensure_output_dir(company)
         out_name = f"Соглашение_ЭДО_{self._safe_filename(org_name)}.docx"
         out_path = os.path.join(out_dir, out_name)

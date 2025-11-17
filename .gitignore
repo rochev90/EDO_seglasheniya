@@ -20,6 +20,7 @@ build/
 *.sqlite3
 
 # Секретные данные
+build.py
 .env
 config.ini
 secrets.json

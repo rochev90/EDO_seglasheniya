@@ -168,7 +168,7 @@ class AgreementGeneratorGUI:
 # Кнопка генерации
         self.generate_btn = tk.Button(
             generate_frame,
-            text="📄 Сформировать и отправить соглашения",
+            text="📄 Сформировать и отправить соглашения",  # Текст обновлен
             command=self.start_processing,
             bg="#e74c3c",
             fg="white",
@@ -440,16 +440,19 @@ class AgreementGeneratorGUI:
     def processing_complete(self, processed: int, total: int):
         """Вызывается после завершения обработки"""
         self.processing = False
-        self.generate_btn.config(state=tk.NORMAL, text="📄 Сформировать соглашения")
-        
+        self.generate_btn.config(state=tk.NORMAL, text="📄 Сформировать и отправить соглашения")
+
         messagebox.showinfo(
             "Обработка завершена",
-            f"Успешно обработано: {processed} из {total}\n\nСоглашения сохранены в папке '{self.config['output_folder']}'"
+            f"Успешно обработано: {processed} из {total}\n\n"
+            f"Соглашения сохранены в папке '{self.config['output_folder']}'\n"
+            f"и отправлены через Диадок"
         )
-        self.log_message(f"\n{'='*60}")
+        self.log_message(f"\n{'=' * 60}")
         self.log_message(f"ОБРАБОТКА ЗАВЕРШЕНА")
         self.log_message(f"Успешно: {processed}/{total}")
-        self.log_message(f"{'='*60}\n")
+        self.log_message(f"Документы отправлены через Диадок")
+        self.log_message(f"{'=' * 60}\n")
     
     def processing_error(self, error_msg: str):
         """Вызывается при ошибке обработки"""

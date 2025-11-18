@@ -59,6 +59,7 @@ class DocumentProcessor:
             "Иванов Иван Иванович" -> "И.И. Иванов"
             "ИП Иванов Иван Иванович" -> "И.И. Иванов"
             "Петров Петр" -> "П. Петров"
+            "Гулиев Парвиз Октай Оглы" -> "П.О. Гулиев"
         """
         # Убираем "ИП" если есть
         fio = full_fio.strip()
@@ -74,11 +75,16 @@ class DocumentProcessor:
         # Фамилия всегда первая
         surname = parts[0]
 
+        # Игнорируемые окончания (если это отдельное слово)
+        ignore_endings = {"оглы", "кызы", "углы", "кизы"}
+
         # Инициалы из имени и отчества
         initials = []
         for part in parts[1:]:
             if part and len(part) > 0:
-                initials.append(part[0].upper() + ".")
+                # Проверяем, не является ли это игнорируемым окончанием
+                if part.lower() not in ignore_endings:
+                    initials.append(part[0].upper() + ".")
 
         # Формируем результат
         if initials:
@@ -149,9 +155,6 @@ class DocumentProcessor:
         """
         Заполняет шаблон для юридического лица.
 
-        ВАЖНО: Названия параметров post_fixed и fio_fixed соответствуют
-        вашим Word шаблонам с тегами {{post_fixed}} и {{fio_fixed}}!
-
         Args:
             company: название компании (КАДИС, ЮрРегионИнформ)
             org_name: название организации
@@ -160,13 +163,13 @@ class DocumentProcessor:
             position: должность (именительный падеж)
             fio: ФИО (именительный падеж, будет преобразовано в И.О. Фамилия)
             post_fixed: должность (родительный падеж)
-            fio_fixed: ФИО (родительный падеж, будет преобразовано в И.О. Фамилия)
+            fio_fixed: ФИО (родительный падеж, полное)
         """
         doc = self._open_template(company, "OOO")
 
-        # Форматируем оба варианта ФИО в И.О. Фамилия
+        # Форматируем только fio в И.О. Фамилия
+        # fio_fixed остается полным ФИО в родительном падеже
         fio_short = self.format_fio_short(fio)
-        fio_fixed_short = self.format_fio_short(fio_fixed)
 
         mapping = {
             "{{JL}}": org_name,
@@ -175,7 +178,7 @@ class DocumentProcessor:
             "{{post}}": position,
             "{{fio}}": fio_short,
             "{{post_fixed}}": post_fixed,
-            "{{fio_fixed}}": fio_fixed_short,
+            "{{fio_fixed}}": fio_fixed,
         }
         mapping.update(self._date_mapping())
         self._apply_mapping(doc, mapping)

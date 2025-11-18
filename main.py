@@ -168,7 +168,7 @@ class AgreementGeneratorGUI:
 # Кнопка генерации
         self.generate_btn = tk.Button(
             generate_frame,
-            text="📄 Сформировать соглашения",
+            text="📄 Сформировать и отправить соглашения",
             command=self.start_processing,
             bg="#e74c3c",
             fg="white",

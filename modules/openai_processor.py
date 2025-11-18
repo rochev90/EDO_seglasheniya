@@ -103,6 +103,10 @@ class OpenAIProcessor:
                     logger.warning("Модель вернула исходные данные без изменений")
                     raise ValueError("Не преобразовано в родительный падеж")
 
+                # Приводим должность к нижнему регистру первой буквы
+                if p1:
+                    p1 = p1[0].lower() + p1[1:] if len(p1) > 1 else p1.lower()
+
                 logger.info(f"✓ Успешно: {position} {fio} → {p1} {p2}")
                 return p1, p2
 

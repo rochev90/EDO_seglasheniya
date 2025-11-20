@@ -340,13 +340,16 @@ class AgreementProcessor:
 
         return True
 
-    def process_counterparties(self, csv_path: str, company: str) -> Tuple[int, int]:
+    def process_counterparties(self, csv_path: str, company: str, date_from: str = None, date_to: str = None) -> Tuple[
+        int, int]:
         """
         Обрабатывает контрагентов из CSV файла
 
         Args:
             csv_path: путь к CSV файлу
             company: КАДИС или ЮрРегионИнформ
+            date_from: начальная дата периода (dd.mm.yyyy)
+            date_to: конечная дата периода (dd.mm.yyyy)
 
         Returns:
             Tuple[успешно обработано, всего новых]
@@ -354,9 +357,12 @@ class AgreementProcessor:
         self._log_and_update(f"Начало обработки контрагентов для компании {company}")
         self._log_and_update(f"Загрузка файла: {csv_path}")
 
-        # Получаем новых контрагентов
+        if date_from and date_to:
+            self._log_and_update(f"Период: с {date_from} по {date_to}")
+
+        # Получаем новых контрагентов с фильтрацией по периоду
         try:
-            new_counterparties = self.db_manager.get_new_counterparties(csv_path, company)
+            new_counterparties = self.db_manager.get_new_counterparties(csv_path, company, date_from, date_to)
             total = len(new_counterparties)
 
             if total == 0:
@@ -373,23 +379,68 @@ class AgreementProcessor:
         processed = 0
         for i, counterparty in enumerate(new_counterparties, 1):
             self._log_and_update(f"\n{'=' * 60}")
-            self._log_and_update(f"Обработка {i}/{total}")
+            self._log_and_update(f"Обработка {i}/{total}: {counterparty.get('Название организации', '')}")
 
-            inn = counterparty.get('ИНН', '')
+            inn = counterparty['ИНН']
+            org_name = counterparty.get('Название организации', '')
 
-            # Определяем тип: ИП или ЮЛ через длину ИНН
-            if len(inn) == 12:
-                # ИП
-                success = self._process_ip(counterparty, company)
-            else:
-                # ЮЛ
-                success = self._process_ul(counterparty, company)
+            try:
+                # Определяем тип: ИП или ЮЛ через длину ИНН
+                if len(inn) == 12:
+                    success = self._process_ip(counterparty, company)
+                else:
+                    success = self._process_ul(counterparty, company)
 
-            if success:
-                processed += 1
-            else:
-                # Если abort, прерываем обработку
-                break
+                if success:
+                    # Добавляем в базу данных только при успешной обработке
+                    db_data = {
+                        "Название организации": org_name,
+                        "ИНН": inn,
+                        "КПП": counterparty.get('КПП', ''),
+                        "Дата изменения статуса": counterparty.get('Дата изменения статуса', '')
+                    }
+                    self.db_manager.add_counterparty(db_data, company)
+                    self._log_and_update(f"Контрагент {org_name} добавлен в базу данных")
+                    processed += 1
+                else:
+                    # Если обработка не удалась, прерываем
+                    break
+
+            except Exception as e:
+                # Логируем ошибку в отдельный файл
+                from modules.logger_manager import log_counterparty_error
+                log_counterparty_error(org_name, inn, str(e), "Ошибка обработки контрагента")
+
+                self._log_and_update(f"❌ Ошибка обработки контрагента {org_name}: {str(e)}", "error")
+
+                # Обработка ошибки через callback
+                if self.error_callback:
+                    action = self.error_callback(
+                        "Ошибка обработки контрагента",
+                        f"Контрагент: {org_name}\nИНН: {inn}\nОшибка: {str(e)}"
+                    )
+
+                    if action == "abort":
+                        break
+                    elif action == "retry":
+                        # Повторяем текущего контрагента
+                        i -= 1
+                        continue
+                    elif action == "skip":
+                        # При пропуске добавляем в БД чтобы избежать повторной обработки
+                        try:
+                            db_data = {
+                                "Название организации": org_name,
+                                "ИНН": inn,
+                                "КПП": counterparty.get('КПП', ''),
+                                "Дата изменения статуса": counterparty.get('Дата изменения статуса', '')
+                            }
+                            self.db_manager.add_counterparty(db_data, company)
+                            self._log_and_update(f"Контрагент {org_name} пропущен и добавлен в БД")
+                            processed += 1
+                        except Exception as db_error:
+                            self._log_and_update(f"Ошибка при добавлении пропущенного контрагента в БД: {db_error}",
+                                                 "warning")
 
         self._log_and_update(f"\n{'=' * 60}")
         self._log_and_update(f"Обработка завершена. Успешно: {processed}/{total}")

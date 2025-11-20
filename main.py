@@ -357,23 +357,32 @@ class AgreementGeneratorGUI:
         
         messagebox.showinfo("Успех", "Настройки сохранены")
         self.log_message("Настройки сохранены")
-    
+
     def create_database(self):
         """Создает базу данных из CSV"""
         company = self.selected_company.get()
-        
+
         csv_path = filedialog.askopenfilename(
             title=f"Выберите CSV файл для создания БД {company}",
             filetypes=[("CSV файлы", "*.csv"), ("Все файлы", "*.*")]
         )
-        
+
         if not csv_path:
             return
-        
+
         try:
-            self.db_manager.create_database_from_csv(csv_path, company)
-            messagebox.showinfo("Успех", f"База данных для {company} создана")
-            self.log_message(f"База данных для {company} создана из CSV")
+            success = self.db_manager.create_database_from_csv(csv_path, company)
+            if success:
+                messagebox.showinfo("Успех",
+                                    f"База данных для {company} создана\nДубликаты ИНН автоматически пропущены")
+                self.log_message(f"База данных для {company} создана из CSV")
+
+                # Экспортируем для просмотра
+                export_path = self.db_manager.export_to_csv(company)
+                self.log_message(f"База данных экспортирована в: {export_path}")
+            else:
+                messagebox.showerror("Ошибка", "Не удалось создать базу данных")
+
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать БД:\n{str(e)}")
             self.log_message(f"ОШИБКА создания БД: {str(e)}", "error")
@@ -426,14 +435,15 @@ class AgreementGeneratorGUI:
             daemon=True
         )
         thread.start()
-    
+
     def process_thread(self, csv_path: str, company: str, date_from: str, date_to: str):
         """Поток обработки контрагентов"""
         try:
-            # Обработка по периоду
-            created = self.processor.process_by_period(company, csv_path, date_from, date_to)
-            total = created
-            self.root.after(0, lambda: self.processing_complete(created, total))
+            # Обработка с фильтрацией по периоду
+            processed, total = self.processor.process_counterparties(
+                csv_path, company, date_from, date_to
+            )
+            self.root.after(0, lambda: self.processing_complete(processed, total))
         except Exception as e:
             self.root.after(0, lambda: self.processing_error(str(e)))
     
